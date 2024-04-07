@@ -29,6 +29,40 @@ access and Process.info care which node they're on.)
 
 `fan_in` merges the distributed streams back into one stream again.
 
+## Partitioning strategies
+
+You may want to control where specific values in the stream get processed. For
+instance, if you're using a cache on each node, it may benefit the cache hit
+rate to have identical values processed on the same node. For that reason,
+`fan_out` can be given a `fan_out_func` that returns `{node, partition}`,
+where `node` is the name of a node in the cluster (as an atom), and
+`partition` is an arbitrary integer. All values that return the same
+`{node, partition}` pair will go to the same process, and that process will be
+spawned on `node`.
+
+For example, to create 4 streams on each node and assign values
+deterministically:
+
+```elixir
+nodes = [node() | Node.list()]
+
+partitions =
+  Enum.flat_map(nodes, fn node ->
+    Enum.map(1..4, &{node, &1})
+  end)
+
+DistributedStream.fan_out(stream, fn value ->
+  Enum.random(partitions)
+end)
+```
+
+There's a shorthand for this deterministic strategy that also happens to be
+better optimized:
+
+```elixir
+DistributedStream.fan_out(stream, strategy: :deterministic, concurrency: 4)
+```
+
 ## Installation
 
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed
@@ -45,4 +79,3 @@ end
 Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at <https://hexdocs.pm/distributed_stream>.
-

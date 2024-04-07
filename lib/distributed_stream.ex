@@ -7,34 +7,57 @@ defmodule DistributedStream do
   end
 
   def fan_out(stream) do
-    fan_out(stream, random_fan_out_func())
+    fan_out(stream, generate_fan_out_func(strategy: :random))
   end
 
-  defp random_fan_out_func do
-    nodes_and_shards = default_nodes_and_shards()
+  @doc false
+  def generate_fan_out_func(opts \\ []) do
+    max_concurrency = Keyword.get(opts, :concurrency, :infinity)
+    strategy = Keyword.get(opts, :strategy, :random)
+    partitions = partitions(max_concurrency) |> List.to_tuple()
+    num_partitions = tuple_size(partitions)
 
-    fn _ ->
-      Enum.random(nodes_and_shards)
+    case strategy do
+      :random ->
+        fn _ ->
+          elem(partitions, :rand.uniform(num_partitions) - 1)
+        end
+
+      :deterministic ->
+        fn value ->
+          elem(partitions, :erlang.phash2(value) |> rem(num_partitions))
+        end
     end
   end
 
-  def default_nodes_and_shards(max_concurrency \\ 64) do
-    {responses, _} = :rpc.multicall(__MODULE__, :node_concurrency, [max_concurrency], 5000)
+  defp partitions(max_concurrency) do
+    {responses, _} = :rpc.multicall(__MODULE__, :node_schedulers, [], 5000)
 
     Enum.flat_map(responses, fn
       :badrpc ->
         []
 
-      {node, concurrency} ->
-        Enum.map(1..concurrency, fn n ->
-          {node, n}
-        end)
+      {node, schedulers} ->
+        concurrency = apply_max_concurrency(schedulers, max_concurrency)
+        Enum.map(1..concurrency, &{node, &1})
     end)
   end
 
+  defp apply_max_concurrency(concurrency, :infinity) do
+    concurrency
+  end
+
+  defp apply_max_concurrency(concurrency, max_concurrency) do
+    min(concurrency, max_concurrency)
+  end
+
   @doc false
-  def node_concurrency(max_concurrency) do
-    {node(), System.schedulers_online() |> min(max_concurrency)}
+  def node_schedulers do
+    {node(), System.schedulers_online()}
+  end
+
+  def fan_out(distributed_stream, opts) when is_list(opts) do
+    fan_out(distributed_stream, generate_fan_out_func(opts))
   end
 
   def fan_out(%__MODULE__{} = distributed_stream, fan_out_func)
