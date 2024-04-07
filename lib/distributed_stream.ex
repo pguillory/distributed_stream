@@ -11,10 +11,9 @@ defmodule DistributedStream do
   end
 
   @doc false
-  def generate_fan_out_func(opts \\ []) do
-    max_concurrency = Keyword.get(opts, :concurrency, :infinity)
+  def generate_fan_out_func(opts \\ []) when is_list(opts) do
     strategy = Keyword.get(opts, :strategy, :random)
-    partitions = partitions(max_concurrency) |> List.to_tuple()
+    partitions = partitions(opts) |> List.to_tuple()
     num_partitions = tuple_size(partitions)
 
     case strategy do
@@ -30,7 +29,9 @@ defmodule DistributedStream do
     end
   end
 
-  defp partitions(max_concurrency) do
+  @doc false
+  def partitions(opts \\ []) when is_list(opts) do
+    max_concurrency = Keyword.get(opts, :concurrency, :infinity)
     {responses, _} = :rpc.multicall(__MODULE__, :node_schedulers, [], 5000)
 
     Enum.flat_map(responses, fn
