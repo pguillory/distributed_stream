@@ -8,7 +8,10 @@ defmodule DistributedStream.MixProject do
       version: "0.1.2",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: [
+        test: "test --no-start"
+      ]
     ]
   end
 
@@ -31,7 +34,8 @@ defmodule DistributedStream.MixProject do
 
   defp deps do
     [
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
+      {:local_cluster, ">= 0.0.0", only: [:test]}
     ]
   end
 end
