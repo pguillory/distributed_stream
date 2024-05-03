@@ -35,7 +35,7 @@ defmodule DistributedStream.MixProject do
   defp deps do
     [
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:local_cluster, ">= 0.0.0", only: [:test]}
+      # {:local_cluster, ">= 0.0.0", only: [:test]}
     ]
   end
 end
