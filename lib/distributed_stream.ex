@@ -130,6 +130,8 @@ defmodule DistributedStream do
       {final_node, 0}
     end
 
+    debug("final pid #{inspect(final_pid)}")
+
     {next_fan_out_func, next_router} =
       Enum.reduce(stages, {final_fan_out_func, final_pid}, fn
         {fan_out_func, transform_funcs}, {next_fan_out_func, next_router} ->
@@ -138,8 +140,8 @@ defmodule DistributedStream do
           {fan_out_func, router}
       end)
 
-    spawn_initial_worker({next_fan_out_func, next_router}, input_stream)
-    gather_stream()
+    initial_worker = spawn_initial_worker({next_fan_out_func, next_router}, input_stream)
+    gather_stream(initial_worker)
   end
 
   def fan_in(stream) do
@@ -178,6 +180,7 @@ defmodule DistributedStream do
           {:ok, worker_pid} ->
             receive do
               {:ready_for_input, ^worker_pid} -> :ok
+              :halt -> throw :halt
             after
               @default_timeout -> throw :timeout
             end
@@ -190,6 +193,7 @@ defmodule DistributedStream do
             worker_pid =
               receive do
                 {:spawned, ^node, ^shard, worker_pid} -> worker_pid
+                :halt -> throw :halt
               after
                 @default_timeout -> throw :timeout
               end
@@ -204,6 +208,10 @@ defmodule DistributedStream do
     end)
 
     # send(router, :done)
+  catch
+    :halt ->
+      debug("worker #{inspect(self())} halting")
+      send(router, :halt)
   end
 
   defp route(node_map, transform_funcs, distribute_func) do
@@ -227,6 +235,11 @@ defmodule DistributedStream do
         debug("router #{inspect(self())} waiting for #{inspect(worker_pids)}")
         :ok = await_all_pids_to_exit(worker_pids)
         worker_pids
+
+      :halt ->
+        debug("router #{inspect(self())} halting")
+        worker_pids = Map.values(node_map)
+        Enum.each(worker_pids, &send(&1, :halt))
     after
       @default_timeout -> throw :timeout
     end
@@ -242,7 +255,7 @@ defmodule DistributedStream do
     end)
   end
 
-  defp gather_stream do
+  defp gather_stream(initial_worker \\ nil) do
     start_func = fn ->
       nil
     end
@@ -278,11 +291,18 @@ defmodule DistributedStream do
             debug("worker #{inspect(self())} got DOWN from #{inspect(pid)}, halting")
             {:halt, nil}
           end
+
+        :halt ->
+          debug("worker #{inspect(self())} halting")
+          {:halt, nil}
       end
     end
 
     after_func = fn _ ->
-      nil
+      if initial_worker do
+        debug("worker #{inspect(self())} reporting done to #{inspect(initial_worker)}")
+        send(initial_worker, :halt)
+      end
     end
 
     Stream.resource(start_func, next_func, after_func)

@@ -31,6 +31,15 @@ defmodule DistributedStreamTest do
     assert fan_out_func.(9) == {node(), 1}
   end
 
+  # test "aborting" do
+  #   1..5000
+  #   |> fan_out(strategy: :deterministic, concurrency: 1)
+  #   |> fan_in()
+  #   |> Enum.take(1)
+
+  #   Process.sleep(10_000)
+  # end
+
   test "generate_fan_out_func (random)" do
     fan_out_func = generate_fan_out_func(strategy: :random, concurrency: 2)
     partitions = Stream.map(1..1000, fan_out_func) |> Enum.uniq() |> Enum.sort()
