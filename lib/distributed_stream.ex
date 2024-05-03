@@ -132,16 +132,16 @@ defmodule DistributedStream do
 
     debug("final pid #{inspect(final_pid)}")
 
-    {next_fan_out_func, next_router} =
-      Enum.reduce(stages, {final_fan_out_func, final_pid}, fn
+    {routers, {next_fan_out_func, next_router}} =
+      Enum.map_reduce(stages, {final_fan_out_func, final_pid}, fn
         {fan_out_func, transform_funcs}, {next_fan_out_func, next_router} ->
           transform_funcs = Enum.reverse(transform_funcs)
           router = spawn_router({next_fan_out_func, next_router}, transform_funcs)
-          {fan_out_func, router}
+          {router, {fan_out_func, router}}
       end)
 
     initial_worker = spawn_initial_worker({next_fan_out_func, next_router}, input_stream)
-    gather_stream(initial_worker)
+    gather_stream([initial_worker | routers])
   end
 
   def fan_in(stream) do
@@ -211,7 +211,7 @@ defmodule DistributedStream do
   catch
     :halt ->
       debug("worker #{inspect(self())} halting")
-      send(router, :halt)
+      Process.exit(self(), :normal)
   end
 
   defp route(node_map, transform_funcs, distribute_func) do
@@ -240,6 +240,7 @@ defmodule DistributedStream do
         debug("router #{inspect(self())} halting")
         worker_pids = Map.values(node_map)
         Enum.each(worker_pids, &send(&1, :halt))
+        Process.exit(self(), :normal)
     after
       @default_timeout -> throw :timeout
     end
@@ -248,14 +249,14 @@ defmodule DistributedStream do
   defp spawn_worker(node, transform_funcs, distribute_func) do
     Node.spawn(node, fn ->
       debug("worker #{inspect(self())} started")
-      stream = gather_stream()
+      stream = gather_stream([])
       stream = Enum.reduce(transform_funcs, stream, & &1.(&2))
       distribute_func.(stream)
       debug("worker #{inspect(self())} finished")
     end)
   end
 
-  defp gather_stream(initial_worker \\ nil) do
+  defp gather_stream(routers) do
     start_func = fn ->
       nil
     end
@@ -299,10 +300,10 @@ defmodule DistributedStream do
     end
 
     after_func = fn _ ->
-      if initial_worker do
-        debug("worker #{inspect(self())} reporting done to #{inspect(initial_worker)}")
-        send(initial_worker, :halt)
-      end
+      Enum.each(routers, fn router ->
+        debug("worker #{inspect(self())} reporting done to #{inspect(router)}")
+        send(router, :halt)
+      end)
     end
 
     Stream.resource(start_func, next_func, after_func)
@@ -358,6 +359,7 @@ defmodule DistributedStream do
 
       receive do
         {:DOWN, ^ref, _, _pid, _reason} -> :ok
+        :halt -> Enum.each(pids, &send(&1, :halt))
       after
         timeout -> throw :timeout
       end
