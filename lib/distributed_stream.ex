@@ -2,6 +2,7 @@ defmodule DistributedStream do
   defstruct [:input_stream, :stages]
 
   @debug false
+  @default_timeout 5000
 
   defmacro debug(string) do
     if @debug do
@@ -42,7 +43,7 @@ defmodule DistributedStream do
   @doc false
   def partitions(opts \\ []) when is_list(opts) do
     max_concurrency = Keyword.get(opts, :concurrency, :infinity)
-    {responses, _} = :rpc.multicall(__MODULE__, :node_schedulers, [], 5000)
+    {responses, _} = :rpc.multicall(__MODULE__, :node_schedulers, [], @default_timeout)
 
     Enum.flat_map(responses, fn
       :badrpc ->
@@ -177,7 +178,7 @@ defmodule DistributedStream do
             receive do
               {:ready_for_input, ^worker_pid} -> :ok
             after
-              5000 -> throw :timeout
+              @default_timeout -> throw :timeout
             end
 
             {worker_pid, node_map}
@@ -189,7 +190,7 @@ defmodule DistributedStream do
               receive do
                 {:spawned, ^node, ^shard, worker_pid} -> worker_pid
               after
-                5000 -> throw :timeout
+                @default_timeout -> throw :timeout
               end
 
             node_map = Map.put(node_map, {node, shard}, worker_pid)
@@ -226,7 +227,7 @@ defmodule DistributedStream do
         :ok = await_all_pids_to_exit(worker_pids)
         worker_pids
     after
-      5000 -> throw :timeout
+      @default_timeout -> throw :timeout
     end
   end
 
@@ -326,7 +327,7 @@ defmodule DistributedStream do
     Stream.transform(stream, start_func, reducer, last_func, after_func)
   end
 
-  defp await_all_pids_to_exit(pids, timeout \\ 5000) do
+  defp await_all_pids_to_exit(pids, timeout \\ @default_timeout) do
     deadline = System.monotonic_time(:millisecond) + timeout
 
     pids
