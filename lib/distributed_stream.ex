@@ -1,6 +1,16 @@
 defmodule DistributedStream do
   defstruct [:input_stream, :stages]
 
+  @debug false
+
+  defmacro debug(string) do
+    if @debug do
+      quote do
+        IO.puts(unquote(string))
+      end
+    end
+  end
+
   def fan_out(%__MODULE__{} = distributed_stream) do
     # TODO: redistribute?
     distributed_stream
@@ -136,16 +146,16 @@ defmodule DistributedStream do
 
   defp spawn_initial_worker({fan_out_func, router}, input_stream) do
     spawn_link(fn ->
-      # IO.puts("initial worker #{inspect(self())} started")
+      debug("initial worker #{inspect(self())} started")
       distribute_stream(input_stream, fan_out_func, router)
       send(router, {:done, [self()]})
-      # IO.puts("initial worker #{inspect(self())} finished")
+      debug("initial worker #{inspect(self())} finished")
     end)
   end
 
   defp spawn_router({fan_out_func, router}, transform_funcs) do
     spawn_link(fn ->
-      # IO.puts("router #{inspect(self())} started")
+      debug("router #{inspect(self())} started")
 
       distribute_func = fn stream ->
         distribute_stream(stream, fan_out_func, router)
@@ -153,7 +163,7 @@ defmodule DistributedStream do
 
       worker_pids = route(%{}, transform_funcs, distribute_func)
       send(router, {:done, worker_pids})
-      # IO.puts("router #{inspect(self())} finished")
+      debug("router #{inspect(self())} finished")
     end)
   end
 
@@ -186,7 +196,7 @@ defmodule DistributedStream do
             {worker_pid, node_map}
         end
 
-      # IO.puts("worker #{inspect(self())} sending #{inspect(values)} to #{inspect(worker_pid)}")
+      debug("worker #{inspect(self())} sending #{inspect(values)} to #{inspect(worker_pid)}")
       send(worker_pid, {:input, self(), values})
       node_map
     end)
@@ -212,7 +222,7 @@ defmodule DistributedStream do
       {:done, previous_layer_worker_pids} ->
         worker_pids = Map.values(node_map)
         Enum.each(worker_pids, &send(&1, {:done, previous_layer_worker_pids}))
-        # IO.puts("router #{inspect(self())} waiting for #{inspect(worker_pids)}")
+        debug("router #{inspect(self())} waiting for #{inspect(worker_pids)}")
         :ok = await_all_pids_to_exit(worker_pids)
         worker_pids
     after
@@ -222,11 +232,11 @@ defmodule DistributedStream do
 
   defp spawn_worker(node, transform_funcs, distribute_func) do
     Node.spawn(node, fn ->
-      # IO.puts("worker #{inspect(self())} started")
+      debug("worker #{inspect(self())} started")
       stream = gather_stream()
       stream = Enum.reduce(transform_funcs, stream, & &1.(&2))
       distribute_func.(stream)
-      # IO.puts("worker #{inspect(self())} finished")
+      debug("worker #{inspect(self())} finished")
     end)
   end
 
@@ -244,7 +254,7 @@ defmodule DistributedStream do
           {[], refs}
 
         {:input, pid, values} ->
-          # IO.puts("worker #{inspect(self())} got #{inspect(values)} from #{inspect(pid)}")
+          debug("worker #{inspect(self())} got #{inspect(values)} from #{inspect(pid)}")
           send(pid, {:ready_for_input, self()})
           {values, refs}
 
@@ -252,7 +262,7 @@ defmodule DistributedStream do
           {:halt, nil}
 
         {:done, [_ | _] = pids} ->
-          # IO.puts("worker #{inspect(self())} waiting for #{inspect(pids)}")
+          debug("worker #{inspect(self())} waiting for #{inspect(pids)}")
           refs = Map.new(pids, &{Process.monitor(&1), &1})
           {[], refs}
 
@@ -260,10 +270,10 @@ defmodule DistributedStream do
           {^pid, refs} = Map.pop!(refs, ref)
 
           if map_size(refs) > 0 do
-            # IO.puts("worker #{inspect(self())} got DOWN from #{inspect(pid)}, continuing")
+            debug("worker #{inspect(self())} got DOWN from #{inspect(pid)}, continuing")
             {[], refs}
           else
-            # IO.puts("worker #{inspect(self())} got DOWN from #{inspect(pid)}, halting")
+            debug("worker #{inspect(self())} got DOWN from #{inspect(pid)}, halting")
             {:halt, nil}
           end
       end
