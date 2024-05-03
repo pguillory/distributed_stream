@@ -3,6 +3,7 @@ defmodule DistributedStream do
 
   @debug false
   @default_timeout 5000
+  @default_chunk_size 1000
 
   defmacro debug(string) do
     if @debug do
@@ -170,7 +171,7 @@ defmodule DistributedStream do
 
   defp distribute_stream(stream, fan_out_func, router) do
     stream
-    |> chunk_every_by(1000, fan_out_func)
+    |> chunk_every_by(@default_chunk_size, fan_out_func)
     |> Enum.reduce(%{}, fn {{node, shard}, values}, node_map ->
       {worker_pid, node_map} =
         case Map.fetch(node_map, {node, shard}) do
